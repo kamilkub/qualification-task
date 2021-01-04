@@ -1,39 +1,53 @@
 package pl.reports.controller;
 
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import pl.reports.dao.Report;
 import pl.reports.dto.PutReportRequest;
+import pl.reports.service.ReportService;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/reports")
 public class ReportController {
 
 
+    private ReportService reportService;
+
+
+    public ReportController(ReportService reportService) {
+        this.reportService = reportService;
+    }
+
     @GetMapping
-    public String getAllReportsData(){
-        return "GET all reports";
+    public List<Report> getAllReportsData(){
+        return reportService.getAllReports();
     }
 
     @GetMapping("/{reportId}")
-    public String getAllReportsData(@PathVariable("reportId") int reportId){
-        return "GET report with id: " + reportId;
+    public Report getOneReportData(@PathVariable("reportId") long reportId){
+        return reportService.getReportById(reportId);
     }
 
     @DeleteMapping("/{reportId}")
-    public String deleteSingleReport(@PathVariable("reportId") int reportId){
-        return "DELETE report with id: " + reportId;
+    public void deleteSingleReport(@PathVariable("reportId") long reportId){
+        reportService.deleteReportById(reportId);
     }
 
     @DeleteMapping
-    public String deleteAllReports(){
-        return "DELETE all reports";
+    public void deleteAllReports(){
+        reportService.deleteAllReports();
     }
 
     @PutMapping("/{reportId}")
-    public String creationOrUpdateOfReport(@PathVariable("reportId") int reportId,
+    public ResponseEntity creationOrUpdateOfReport(@PathVariable("reportId") long reportId,
                                            @RequestBody PutReportRequest putReport){
+        reportService.createOrUpdateReport(reportId, putReport);
 
-        return "PUT report creation or update with id: " + reportId + " with data " + putReport.toString();
+        return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
 
