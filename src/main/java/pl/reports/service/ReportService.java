@@ -1,173 +1,143 @@
 package pl.reports.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import pl.reports.dao.Report;
-import pl.reports.dao.Result;
-import pl.reports.dto.Planet;
-import pl.reports.dto.PutReportRequest;
+import pl.reports.dao.ReportResult;
+import pl.reports.dto.PutRequest;
+import pl.reports.dto.third_api.Character;
+import pl.reports.dto.third_api.Planet;
+import pl.reports.dto.third_api.films.Film;
+import pl.reports.dto.third_api.films.FilmsResponse;
 import pl.reports.repository.ReportRepository;
-import pl.reports.repository.ResultRepository;
+import pl.reports.repository.ReportResultRepository;
 
-
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 
 @Service
 public class ReportService {
 
+
+    @Value("${starwars.films.url}")
+    private String STAR_WARS_FILMS_URL;
+
+    @Value("${starwars.people.url}")
+    private String STAR_WARS_PEOPLE_URL;
+
+    @Value("${starwars.planets.url}")
+    private String STAR_WARS_PLANETS_URL;
+
     private ReportRepository reportRepository;
-    private ResultRepository resultRepository;
+    private ReportResultRepository reportResultRepository;
 
-    @Value("${starwars.base.url}")
-    private String starWarsAPI;
+    private static final RestTemplate REST_TEMPLATE = new RestTemplate();
 
-    public ReportService(ReportRepository reportRepository, ResultRepository resultRepository) {
+
+    public ReportService(ReportRepository reportRepository, ReportResultRepository reportResultRepository) {
         this.reportRepository = reportRepository;
-        this.resultRepository = resultRepository;
+        this.reportResultRepository = reportResultRepository;
     }
 
-    public void deleteAllReports(){
+    public void deleteAllReports() {
         reportRepository.deleteAll();
     }
 
-    public void deleteReportById(Long id){
-        if(exists(id))
+    public void deleteReportById(Long id) {
+        if (exists(id))
             reportRepository.deleteById(id);
     }
 
-    public List<Report> getAllReports(){
+    private void saveReport(Report report) {
+        reportRepository.save(report);
+    }
+
+    public List<Report> getAllReports() {
         return reportRepository.findAll();
     }
 
-    public Report getReportById(Long id){
-        return reportRepository.getOne(id);
+    public Report getReportById(Long id) {
+        return reportRepository.findById(id).orElse(null);
     }
 
-    public boolean exists(Long id){
-       return reportRepository.findById(id).isPresent();
+    public boolean exists(Long id) {
+        return reportRepository.findById(id).isPresent();
     }
 
-    public void createOrUpdateReport(Long id, PutReportRequest reportRequest){
-        Optional<Report> reportOptional = reportRepository.findById(id);
 
-        int peopleCount = getPeopleCountFromAPI();
-        Result result = Objects.requireNonNull(findDataByCriteria(reportRequest, peopleCount));
+    public void generateRaport(Long id, PutRequest putRequest) {
+        Optional<Report> report = reportRepository.findById(id);
 
+        if (report.isPresent()) {
+            Report updateReport = report.get();
 
-        if(reportOptional.isPresent()){
-            Report updateReport = reportOptional.get();
+            queryFilms(putRequest, updateReport.getResults());
 
-            updateReport.setQueryCriteriaCharacterPhrase(reportRequest.getQuery_criteria_character_phrase());
-            updateReport.setQueryCriteriaPlanetName(reportRequest.getQuery_criteria_planet_name());
-
-            updateReport.setResult(List.of(result));
-
-            resultRepository.save(result);
-            reportRepository.save(updateReport);
+            shutDownThreadsAndSave(updateReport);
 
         } else {
-            Report report = new Report();
+            Report createReport = new Report();
+            Set<ReportResult> results = new HashSet<>();
 
-            report.setQueryCriteriaCharacterPhrase(reportRequest.getQuery_criteria_character_phrase());
-            report.setQueryCriteriaPlanetName(reportRequest.getQuery_criteria_planet_name());
+            queryFilms(putRequest, results);
+            createReport.setResults(results);
 
-            report.setResult(List.of(result));
-
-            resultRepository.save(result);
-            reportRepository.save(report);
-
-        }
-
-
-
-    }
-
-
-    private int getPeopleCountFromAPI()  {
-        RestTemplate restTemplate = new RestTemplate();
-        ResponseEntity<String> response = restTemplate.getForEntity(this.starWarsAPI + "people", String.class);
-
-        try {
-            JsonNode node = new ObjectMapper().readTree(response.getBody());
-            return node.path("count").asInt();
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return 0;
+            shutDownThreadsAndSave(createReport);
         }
 
     }
 
-    private Result findDataByCriteria(PutReportRequest putReportRequest, int peopleCount){
-        RestTemplate restTemplate = new RestTemplate();
-        int count = 1;
+    private void shutDownThreadsAndSave(Report report) {
+        saveReport(report);
 
-        while(count <= peopleCount){
-            String url = this.starWarsAPI + "people/" + count;
-            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+    }
 
-            try {
-                JsonNode node = new ObjectMapper().readTree(response.getBody());
-                String characterName = node.path("name").asText();
-
-                if(characterName.equalsIgnoreCase(putReportRequest.getQuery_criteria_character_phrase())){
-
-                    Planet planet = getCharacterHomeWorld(node, restTemplate, putReportRequest);
-                    int lastSlash = url.lastIndexOf("/");
-                    String characterId = url.substring(lastSlash + 1, lastSlash + 2);
+    private void queryFilms(PutRequest putRequest, Set<ReportResult> reportResultSet) {
+        ResponseEntity<FilmsResponse> films = REST_TEMPLATE.getForEntity(STAR_WARS_FILMS_URL, FilmsResponse.class);
 
 
-                    Result result = new Result();
-                    result.setCharacterId(characterId);
-                    result.setCharacterName(characterName);
-                    result.setPlanetId(planet.getPlanetId());
-                    result.setPlanetName(planet.getPlanetName());
+        if (Objects.requireNonNull(films.getBody()).getCount() > 0) {
+            films.getBody().getResults().forEach(film ->
+                    findCharacterPhraseAndPlanet(film, putRequest, reportResultSet));
 
-                    return result;
+        }
+    }
 
+    private void findCharacterPhraseAndPlanet(Film film, PutRequest putRequest, Set<ReportResult> reportResultSet) {
+
+        film.getCharacters().forEach(characterUrl -> {
+            ResponseEntity<Character> character = REST_TEMPLATE.getForEntity(characterUrl, Character.class);
+            String characterName = character.getBody().getName();
+            String planetUrl = character.getBody().getHomeworld();
+
+            if (characterName.contains(putRequest.getQueryCriteriaCharacterPhrase())) {
+                ReportResult result = new ReportResult();
+                result.setCharacterName(characterName);
+                result.setFilmName(film.getTitle());
+                result.setFilmId(film.getEpisode_id());
+
+                if (findCharacterPlanetAndDoesItMatchCriteria(planetUrl, putRequest, result)) {
+                    reportResultRepository.save(result);
+                    reportResultSet.add(result);
                 }
-
-
-            } catch (JsonProcessingException e) {
-                e.printStackTrace();
             }
-
-            count++;
-        }
-
-        return null;
+        });
     }
 
-    private Planet getCharacterHomeWorld(JsonNode jsonDataBody, RestTemplate restTemplate, PutReportRequest putReportRequest){
-        String homeWorldUrl = jsonDataBody.path("homeworld").asText();
+    private boolean findCharacterPlanetAndDoesItMatchCriteria(String planetUrl, PutRequest putRequest, ReportResult result) {
+        ResponseEntity<Planet> planet = REST_TEMPLATE.getForEntity(planetUrl, Planet.class);
+        String planetName = planet.getBody().getName();
 
-        ResponseEntity<String> response = restTemplate.getForEntity(homeWorldUrl, String.class);
-
-        try {
-            JsonNode node = new ObjectMapper().readTree(response.getBody());
-            String planetName = node.path("name").asText();
-
-            if(planetName.equalsIgnoreCase(putReportRequest.getQuery_criteria_planet_name())){
-                int lastSlash = homeWorldUrl.lastIndexOf("/");
-                String planetId = homeWorldUrl.substring(lastSlash - 1, lastSlash);
-
-               return new Planet(planetId,planetName);
-            }
-
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
+        if (planetName.equalsIgnoreCase(putRequest.getQueryCriteriaPlanetName())) {
+            result.setPlanetName(planetName);
+            int lastSlash = planetUrl.lastIndexOf("/");
+            result.setPlanetId(planetUrl.substring(lastSlash - 2));
+            return true;
         }
 
-        return null;
-
+        return false;
     }
-
 
 
 }

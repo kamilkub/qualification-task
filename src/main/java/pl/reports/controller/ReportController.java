@@ -5,7 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import pl.reports.dao.Report;
-import pl.reports.dto.PutReportRequest;
+import pl.reports.dto.PutRequest;
 import pl.reports.service.ReportService;
 
 import java.util.List;
@@ -44,9 +44,8 @@ public class ReportController {
 
     @PutMapping("/{reportId}")
     public ResponseEntity creationOrUpdateOfReport(@PathVariable("reportId") long reportId,
-                                           @RequestBody PutReportRequest putReport){
-        reportService.createOrUpdateReport(reportId, putReport);
-
+                                                   @RequestBody PutRequest putReport) {
+        reportService.generateRaport(reportId, putReport);
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
